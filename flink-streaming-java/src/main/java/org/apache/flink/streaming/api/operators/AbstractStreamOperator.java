@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.api.operators;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.ExecutionConfig;
@@ -63,11 +64,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.LatencyStats;
-import org.apache.flink.util.CloseableIterable;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.IOUtils;
-import org.apache.flink.util.OutputTag;
-import org.apache.flink.util.Preconditions;
+import org.apache.flink.util.*;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -784,7 +781,11 @@ public abstract class AbstractStreamOperator<OUT>
 
 	public void processWatermark(Watermark mark) throws Exception {
 		if (timeServiceManager != null) {
-			timeServiceManager.advanceWatermark(mark);
+			if(StringUtils.isNotBlank(mark.getKey())){
+				timeServiceManager.advanceWatermarkByKey(mark, mark.getKey());
+			}else {
+				timeServiceManager.advanceWatermark(mark);
+			}
 		}
 		output.emitWatermark(mark);
 	}

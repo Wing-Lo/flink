@@ -49,6 +49,8 @@ public final class Watermark extends StreamElement {
 	/** The timestamp of the watermark in milliseconds. */
 	private final long timestamp;
 
+	private String key;
+
 	/**
 	 * Creates a new watermark with the given timestamp in milliseconds.
 	 */
@@ -56,11 +58,20 @@ public final class Watermark extends StreamElement {
 		this.timestamp = timestamp;
 	}
 
+	public Watermark(long timestamp, String key) {
+		this.timestamp = timestamp;
+		this.key = key;
+	}
+
 	/**
 	 * Returns the timestamp associated with this {@link Watermark} in milliseconds.
 	 */
 	public long getTimestamp() {
 		return timestamp;
+	}
+
+	public String  getKey() {
+		return key;
 	}
 
 	// ------------------------------------------------------------------------
@@ -78,6 +89,6 @@ public final class Watermark extends StreamElement {
 
 	@Override
 	public String toString() {
-		return "Watermark @ " + timestamp;
+		return "Watermark @ " + timestamp + ", " + key;
 	}
 }

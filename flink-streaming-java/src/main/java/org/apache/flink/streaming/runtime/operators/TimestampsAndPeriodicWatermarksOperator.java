@@ -24,6 +24,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeCallback;
+import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 
 /**
  * A stream operator that extracts timestamps from stream elements and
@@ -54,7 +55,8 @@ public class TimestampsAndPeriodicWatermarksOperator<T>
 		watermarkInterval = getExecutionConfig().getAutoWatermarkInterval();
 
 		if (watermarkInterval > 0) {
-			long now = getProcessingTimeService().getCurrentProcessingTime();
+			ProcessingTimeService processingTimeService = getProcessingTimeService();
+			long now = processingTimeService.getCurrentProcessingTime();
 			getProcessingTimeService().registerTimer(now + watermarkInterval, this);
 		}
 	}
@@ -69,6 +71,7 @@ public class TimestampsAndPeriodicWatermarksOperator<T>
 
 	@Override
 	public void onProcessingTime(long timestamp) throws Exception {
+		System.out.println("onProcessingTime:"+timestamp);
 		// register next timer
 		Watermark newWatermark = userFunction.getCurrentWatermark();
 		if (newWatermark != null && newWatermark.getTimestamp() > currentWatermark) {

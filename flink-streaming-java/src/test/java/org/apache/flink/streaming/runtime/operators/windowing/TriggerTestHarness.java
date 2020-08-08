@@ -324,6 +324,11 @@ public class TriggerTestHarness<T, W extends Window> {
 		}
 
 		@Override
+		public long getCurrentWatermarkByKey() {
+			return 0;
+		}
+
+		@Override
 		public void registerProcessingTimeTimer(long time) {
 			timerService.registerProcessingTimeTimer(window, time);
 		}

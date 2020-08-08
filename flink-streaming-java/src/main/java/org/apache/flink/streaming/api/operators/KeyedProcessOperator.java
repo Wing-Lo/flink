@@ -24,6 +24,7 @@ import org.apache.flink.streaming.api.SimpleTimerService;
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.util.OutputTag;
 
@@ -182,5 +183,17 @@ public class KeyedProcessOperator<K, IN, OUT>
 		public K getCurrentKey() {
 			return timer.getKey();
 		}
+	}
+
+	@Override
+	public void processWatermark(Watermark mark) throws Exception {
+		if (timeServiceManager != null) {
+			Object key = getCurrentKey();
+			if(key != null){
+				timeServiceManager.advanceWatermarkByKey(mark, key);
+			}
+			timeServiceManager.advanceWatermark(mark);
+		}
+		output.emitWatermark(mark);
 	}
 }

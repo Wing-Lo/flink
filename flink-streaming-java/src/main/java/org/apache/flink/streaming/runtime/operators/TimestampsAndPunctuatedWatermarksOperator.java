@@ -24,6 +24,9 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * A stream operator that extracts timestamps from stream elements and
  * generates watermarks based on punctuation elements.
@@ -37,6 +40,37 @@ public class TimestampsAndPunctuatedWatermarksOperator<T>
 	private static final long serialVersionUID = 1L;
 
 	private long currentWatermark = Long.MIN_VALUE;
+
+	private Map<String, Watermark> currentWatermarkMap = new ConcurrentHashMap<>();
+
+	private long getCurrentWatermark(){
+		return currentWatermark;
+	}
+
+	private long getCurrentWatermark(Watermark watermark){
+		if(watermark == null){
+			return getCurrentWatermark();
+		}
+		if(null == watermark.getKey() || "".equals(watermark.getKey())){
+			return getCurrentWatermark();
+		}
+		Watermark watermark1 = currentWatermarkMap.get(watermark.getKey());
+		if(watermark1 == null){
+			return getCurrentWatermark();
+		}
+		return watermark1.getTimestamp();
+	}
+
+	private void setCurrentWatermark(long watermark){
+		this.currentWatermark = watermark;
+	}
+
+	private void setCurrentWatermark(Watermark watermark){
+		if(watermark == null || null == watermark.getKey() || "".equals(watermark.getKey())){
+			this.setCurrentWatermark(watermark.getTimestamp());
+		}
+		this.currentWatermarkMap.put(watermark.getKey(), watermark);
+	}
 
 	public TimestampsAndPunctuatedWatermarksOperator(AssignerWithPunctuatedWatermarks<T> assigner) {
 		super(assigner);
@@ -52,8 +86,8 @@ public class TimestampsAndPunctuatedWatermarksOperator<T>
 		output.collect(element.replace(element.getValue(), newTimestamp));
 
 		final Watermark nextWatermark = userFunction.checkAndGetNextWatermark(value, newTimestamp);
-		if (nextWatermark != null && nextWatermark.getTimestamp() > currentWatermark) {
-			currentWatermark = nextWatermark.getTimestamp();
+		if (nextWatermark != null && nextWatermark.getTimestamp() > getCurrentWatermark(nextWatermark)) {
+			setCurrentWatermark(nextWatermark);
 			output.emitWatermark(nextWatermark);
 		}
 	}

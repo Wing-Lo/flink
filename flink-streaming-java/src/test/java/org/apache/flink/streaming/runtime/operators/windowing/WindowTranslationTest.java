@@ -19,12 +19,7 @@
 package org.apache.flink.streaming.runtime.operators.windowing;
 
 import org.apache.flink.api.common.ExecutionConfig;
-import org.apache.flink.api.common.functions.AggregateFunction;
-import org.apache.flink.api.common.functions.FoldFunction;
-import org.apache.flink.api.common.functions.ReduceFunction;
-import org.apache.flink.api.common.functions.RichAggregateFunction;
-import org.apache.flink.api.common.functions.RichFoldFunction;
-import org.apache.flink.api.common.functions.RichReduceFunction;
+import org.apache.flink.api.common.functions.*;
 import org.apache.flink.api.common.state.AggregatingStateDescriptor;
 import org.apache.flink.api.common.state.FoldingStateDescriptor;
 import org.apache.flink.api.common.state.ListStateDescriptor;
@@ -39,11 +34,14 @@ import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.WindowedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks;
+import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.OutputTypeConfigurable;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingProcessingTimeWindows;
@@ -65,6 +63,11 @@ import org.apache.flink.util.Collector;
 import org.junit.Assert;
 import org.junit.Test;
 
+import javax.annotation.Nullable;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertTrue;
@@ -1057,7 +1060,8 @@ public class WindowTranslationTest {
 
 		DataStream<Tuple2<String, Integer>> window1 = source
 				.keyBy(new TupleKeySelector())
-				.window(TumblingEventTimeWindows.of(Time.of(1, TimeUnit.SECONDS)))
+				.window(TumblingEventTimeWindows.of(Time.of(1, TimeUnit.SECONDS))
+					.supportKeyedWatermark(true))
 				.apply(new WindowFunction<Tuple2<String, Integer>, Tuple2<String, Integer>, String, TimeWindow>() {
 					private static final long serialVersionUID = 1L;
 
@@ -1081,6 +1085,137 @@ public class WindowTranslationTest {
 		Assert.assertTrue(winOperator.getStateDescriptor() instanceof ListStateDescriptor);
 
 		processElementAndEnsureOutput(winOperator, winOperator.getKeySelector(), BasicTypeInfo.STRING_TYPE_INFO, new Tuple2<>("hello", 1));
+	}
+
+	public static class Splitter implements MapFunction<String, Tuple2<String, Integer>> {
+
+
+		@Override
+		public Tuple2<String, Integer> map(String value) throws Exception {
+			return new Tuple2<String, Integer>(value.split(" ")[0], Integer.parseInt(value.split(" ")[1]));
+		}
+	}
+
+	/**
+	 * hello 1
+	 * hello 2
+	 * hello 12
+	 * hello2 10
+	 * @throws Exception
+	 */
+	@Test
+	@SuppressWarnings("rawtypes")
+	public void testApplyEventTime2() throws Exception {
+		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
+
+//		DataStream<Tuple2<String, Integer>> source = env.fromElements(Tuple2.of("hello", 1), Tuple2.of("hello", 2), Tuple2.of("hello", 12), Tuple2.of("hello2", 10));
+
+		DataStream<Tuple2<String, Integer>> source = env
+			.socketTextStream("localhost", 9999)
+			.map(new Splitter());
+
+
+		DataStream<Tuple2<String, Integer>> window1 = source
+			.assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Tuple2<String, Integer>>() {
+
+				/**
+				 * Asks this implementation if it wants to emit a watermark. This method is called right after
+				 * the {@link #extractTimestamp(Object, long)} method.
+				 *
+				 * <p>The returned watermark will be emitted only if it is non-null and its timestamp
+				 * is larger than that of the previously emitted watermark (to preserve the contract of
+				 * ascending watermarks). If a null value is returned, or the timestamp of the returned
+				 * watermark is smaller than that of the last emitted one, then no new watermark will
+				 * be generated.
+				 *
+				 * <p>For an example how to use this method, see the documentation of
+				 * {@link AssignerWithPunctuatedWatermarks this class}.
+				 *
+				 * @param lastElement
+				 * @param extractedTimestamp
+				 * @return {@code Null}, if no watermark should be emitted, or the next watermark to emit.
+				 */
+				@Nullable
+				@Override
+				public Watermark checkAndGetNextWatermark(Tuple2<String, Integer> element, long extractedTimestamp) {
+					long timestamp = element.f1 * 1000;
+					if(timestamp > getCurrentTimestamp(element.f0)){
+						this.setCurrentTimestamp(element.f0, timestamp);
+					}
+					return new Watermark(getCurrentTimestamp(element.f0), element.f0);
+				}
+
+				private long currentTimestamp = Long.MIN_VALUE;
+
+				private Map<String, Long> watermarkMap = new ConcurrentHashMap();
+
+				private long getCurrentTimestamp(){
+					return currentTimestamp;
+				}
+
+				private long getCurrentTimestamp(String key){
+					Long aLong = watermarkMap.get(key);
+					if(aLong == null){
+						return Long.MIN_VALUE;
+					}else{
+						return aLong;
+					}
+				}
+
+				public void setCurrentTimestamp(long currentTimestamp) {
+					this.currentTimestamp = currentTimestamp;
+				}
+
+				public void setCurrentTimestamp(String key, long currentTimestamp) {
+					watermarkMap.put(key, currentTimestamp);
+				}
+
+				@Nullable
+//				@Override
+//				public Watermark getCurrentWatermark() {
+//					return new Watermark(currentTimestamp);
+//				}
+
+
+
+				@Override
+				public long extractTimestamp(Tuple2<String, Integer> element, long previousElementTimestamp) {
+					long timestamp = Math.max(element.f1 * 1000, previousElementTimestamp);
+					if(timestamp > getCurrentTimestamp(element.f0)){
+						this.setCurrentTimestamp(element.f0, timestamp);
+					}
+					return getCurrentTimestamp(element.f0);
+				}
+			})
+			.setParallelism(1)
+			.keyBy(new TupleKeySelector())
+			.window(TumblingEventTimeWindows.of(Time.of(10, TimeUnit.SECONDS))
+				.supportKeyedWatermark(false)
+			)
+			.process(new ProcessWindowFunction<Tuple2<String, Integer>, Tuple2<String, Integer>, String, TimeWindow>() {
+				@Override
+				public void process(String s, Context context, Iterable<Tuple2<String, Integer>> elements, Collector<Tuple2<String, Integer>> out) throws Exception {
+					TimeWindow window = context.window();
+					long start = window.getStart();
+					long end = window.getEnd();
+					SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+					System.out.println(sdf.format(new Date(start))+"到"+sdf.format(new Date(end))+"的窗口:");
+					int sum = 0;
+					for (Tuple2<String, Integer> in : elements) {
+						sum += in.f1;
+						System.out.println("\t"+in);
+					}
+					out.collect(Tuple2.of(s, sum));
+				}
+			});
+
+		window1.print();
+
+		env.execute();
+
+
+//		processElementAndEnsureOutput(winOperator, winOperator.getKeySelector(), BasicTypeInfo.STRING_TYPE_INFO, new Tuple2<>("hello2", 1));
 	}
 
 	@Test

@@ -51,7 +51,13 @@ class KeyedProcessOperatorWithWatermarkDelay[KEY, IN, OUT](
 
   @throws[Exception]
   override def processWatermark(mark: Watermark) {
-    if (timeServiceManager != null) timeServiceManager.advanceWatermark(mark)
+    if (timeServiceManager != null) {
+      val key = getCurrentKey()
+      if(key != null){
+        timeServiceManager.advanceWatermarkByKey(mark, getCurrentKey())
+      }
+      timeServiceManager.advanceWatermark(mark)
+    }
 
     emitter(mark)
   }

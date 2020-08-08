@@ -22,13 +22,18 @@ import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.api.windowing.triggers.EventTimeTrigger;
 import org.apache.flink.streaming.api.windowing.triggers.Trigger;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 
 /**
  * A {@link WindowAssigner} that windows elements into windows based on the timestamp of the
@@ -45,6 +50,15 @@ import java.util.Collections;
 @PublicEvolving
 public class TumblingEventTimeWindows extends WindowAssigner<Object, TimeWindow> {
 	private static final long serialVersionUID = 1L;
+
+	protected static final Logger LOG = LoggerFactory.getLogger(TumblingEventTimeWindows.class);
+
+	private boolean supportKeyedWatermark;
+
+	public TumblingEventTimeWindows supportKeyedWatermark(boolean supportKeyedWatermark){
+		this.supportKeyedWatermark = supportKeyedWatermark;
+		return this;
+	}
 
 	private final long size;
 
@@ -64,6 +78,8 @@ public class TumblingEventTimeWindows extends WindowAssigner<Object, TimeWindow>
 		if (timestamp > Long.MIN_VALUE) {
 			// Long.MIN_VALUE is currently assigned when no timestamp is present
 			long start = TimeWindow.getWindowStartWithOffset(timestamp, offset, size);
+			SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+			System.out.println("element:"+element+",timestamp"+timestamp+",被分配到了"+sdf.format(new Date(start))+"开始的窗口");
 			return Collections.singletonList(new TimeWindow(start, start + size));
 		} else {
 			throw new RuntimeException("Record has Long.MIN_VALUE timestamp (= no timestamp marker). " +
@@ -74,7 +90,7 @@ public class TumblingEventTimeWindows extends WindowAssigner<Object, TimeWindow>
 
 	@Override
 	public Trigger<Object, TimeWindow> getDefaultTrigger(StreamExecutionEnvironment env) {
-		return EventTimeTrigger.create();
+		return EventTimeTrigger.create(supportKeyedWatermark);
 	}
 
 	@Override

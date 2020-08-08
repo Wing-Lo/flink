@@ -385,7 +385,7 @@ public class WindowOperator<K, IN, ACC, OUT, W extends Window>
 			for (W window: elementWindows) {
 
 				// drop if the window is already late
-				if (isWindowLate(window)) {
+				if (isWindowLate(window)) {LOG.info("\nwindow is late!\twindow:{}\tcontext:{}\tallowedLateness:{}", window, triggerContext, allowedLateness);
 					continue;
 				}
 				isSkippedElement = false;
@@ -398,6 +398,7 @@ public class WindowOperator<K, IN, ACC, OUT, W extends Window>
 
 				TriggerResult triggerResult = triggerContext.onElement(element);
 
+				System.out.println("processElement window "+(triggerResult.isFire() ? "fire" : "continue"));
 				if (triggerResult.isFire()) {
 					ACC contents = windowState.get();
 					if (contents == null) {
@@ -451,6 +452,7 @@ public class WindowOperator<K, IN, ACC, OUT, W extends Window>
 
 		TriggerResult triggerResult = triggerContext.onEventTime(timer.getTimestamp());
 
+		System.out.println("onEventTime window "+(triggerResult.isFire() ? "fire" : "continue"));
 		if (triggerResult.isFire()) {
 			ACC contents = windowState.get();
 			if (contents != null) {
@@ -805,6 +807,11 @@ public class WindowOperator<K, IN, ACC, OUT, W extends Window>
 
 		public long getCurrentWatermark() {
 			return internalTimerService.currentWatermark();
+		}
+
+		@Override
+		public long getCurrentWatermarkByKey() {
+			return internalTimerService.currentWatermark(key);
 		}
 
 		@Override

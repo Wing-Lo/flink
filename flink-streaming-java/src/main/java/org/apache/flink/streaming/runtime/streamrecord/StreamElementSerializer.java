@@ -177,6 +177,8 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 		else if (value.isWatermark()) {
 			target.write(TAG_WATERMARK);
 			target.writeLong(value.asWatermark().getTimestamp());
+			// 必须要加\n作为结束符
+			target.writeChars(value.asWatermark().getKey() + '\n');
 		}
 		else if (value.isStreamStatus()) {
 			target.write(TAG_STREAM_STATUS);
@@ -205,7 +207,14 @@ public final class StreamElementSerializer<T> extends TypeSerializer<StreamEleme
 			return new StreamRecord<T>(typeSerializer.deserialize(source));
 		}
 		else if (tag == TAG_WATERMARK) {
-			return new Watermark(source.readLong());
+			long l = source.readLong();
+			char c;
+			final StringBuilder bld = new StringBuilder();
+			while((c = source.readChar()) != '\n'){
+				bld.append(c);
+			}
+
+			return new Watermark(l, bld.toString());
 		}
 		else if (tag == TAG_STREAM_STATUS) {
 			return new StreamStatus(source.readInt());

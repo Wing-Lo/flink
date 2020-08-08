@@ -129,6 +129,12 @@ public class InternalTimeServiceManager<K> {
 		}
 	}
 
+	public void advanceWatermarkByKey(Watermark watermark, Object key) throws Exception {
+		for (InternalTimerServiceImpl<?, ?> service : timerServices.values()) {
+			service.advanceWatermarkByKey(watermark.getTimestamp(), key);
+		}
+	}
+
 	//////////////////				Fault Tolerance Methods				///////////////////
 
 	public void snapshotStateForKeyGroup(DataOutputView stream, int keyGroupIdx) throws IOException {

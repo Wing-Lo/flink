@@ -30,12 +30,25 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 @PublicEvolving
 public class EventTimeTrigger extends Trigger<Object, TimeWindow> {
 	private static final long serialVersionUID = 1L;
+	private boolean supportedKeyedWatermark = false;
 
 	private EventTimeTrigger() {}
 
+	private EventTimeTrigger(boolean supportedKeyedWatermark) {
+		this.supportedKeyedWatermark = supportedKeyedWatermark;
+	}
+
 	@Override
 	public TriggerResult onElement(Object element, long timestamp, TimeWindow window, TriggerContext ctx) throws Exception {
-		if (window.maxTimestamp() <= ctx.getCurrentWatermark()) {
+		long currentWatermark = Long.MIN_VALUE;
+		if(supportedKeyedWatermark){
+			currentWatermark = ctx.getCurrentWatermarkByKey();
+		}else{
+			currentWatermark = ctx.getCurrentWatermark();
+		}
+		System.out.println("onElement:"+element+"currentWatermark:"+currentWatermark+",window:"+window);
+
+		if (window.maxTimestamp() <= currentWatermark) {
 			// if the watermark is already past the window fire immediately
 			return TriggerResult.FIRE;
 		} else {
@@ -89,6 +102,9 @@ public class EventTimeTrigger extends Trigger<Object, TimeWindow> {
 	 * <p>Once the trigger fires all elements are discarded. Elements that arrive late immediately
 	 * trigger window evaluation with just this one element.
 	 */
+	public static EventTimeTrigger create(boolean supportedKeyedWatermark) {
+		return new EventTimeTrigger(supportedKeyedWatermark);
+	}
 	public static EventTimeTrigger create() {
 		return new EventTimeTrigger();
 	}

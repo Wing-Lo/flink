@@ -24,6 +24,9 @@ import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput.DataOutput;
 import org.apache.flink.util.Preconditions;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -50,6 +53,7 @@ public class StatusWatermarkValve {
 
 	/** The last watermark emitted from the valve. */
 	private long lastOutputWatermark;
+	private Map<String, Watermark> lastOutputWatermarkMap;
 
 	/** The last stream status emitted from the valve. */
 	private StreamStatus lastOutputStreamStatus;
@@ -72,8 +76,38 @@ public class StatusWatermarkValve {
 
 		this.output = checkNotNull(output);
 
+		this.lastOutputWatermarkMap = new ConcurrentHashMap<>();
 		this.lastOutputWatermark = Long.MIN_VALUE;
 		this.lastOutputStreamStatus = StreamStatus.ACTIVE;
+	}
+
+	private long getLastOutputWatermark(){
+		return Long.MIN_VALUE;
+	}
+
+	private long getLastOutputWatermark(Watermark watermark){
+		if(watermark == null){
+			return getLastOutputWatermark();
+		}
+		if(null == watermark.getKey() || "".equals(watermark.getKey())){
+			return getLastOutputWatermark();
+		}
+		Watermark watermark1 = lastOutputWatermarkMap.get(watermark.getKey());
+		if(watermark1 == null){
+			return getLastOutputWatermark();
+		}
+		return watermark1.getTimestamp();
+	}
+
+	private void setLastOutputWatermark(long watermark){
+		this.lastOutputWatermark = watermark;
+	}
+
+	private void setLastOutputWatermark(Watermark watermark){
+		if(watermark == null || null == watermark.getKey() || "".equals(watermark.getKey())){
+			return;
+		}
+		lastOutputWatermarkMap.put(watermark.getKey(), watermark);
 	}
 
 	/**
@@ -89,16 +123,16 @@ public class StatusWatermarkValve {
 			long watermarkMillis = watermark.getTimestamp();
 
 			// if the input watermark's value is less than the last received watermark for its input channel, ignore it also.
-			if (watermarkMillis > channelStatuses[channelIndex].watermark) {
-				channelStatuses[channelIndex].watermark = watermarkMillis;
+			if (watermarkMillis > channelStatuses[channelIndex].getWatermarkTimestampByWatermark(watermark)) {
+				channelStatuses[channelIndex].setWatermark(watermark);
 
 				// previously unaligned input channels are now aligned if its watermark has caught up
-				if (!channelStatuses[channelIndex].isWatermarkAligned && watermarkMillis >= lastOutputWatermark) {
+				if (!channelStatuses[channelIndex].isWatermarkAligned && watermarkMillis >= getLastOutputWatermark(watermark)) {
 					channelStatuses[channelIndex].isWatermarkAligned = true;
 				}
 
 				// now, attempt to find a new min watermark across all aligned channels
-				findAndOutputNewMinWatermarkAcrossAlignedChannels();
+				findAndOutputNewMinWatermarkAcrossAlignedChannels(watermark);
 			}
 		}
 	}
@@ -129,17 +163,17 @@ public class StatusWatermarkValve {
 				// the max watermark across all channels as the new watermark. Also, since we already try to advance
 				// the min watermark as channels individually become IDLE, here we only need to perform the flush
 				// if the watermark of the last active channel that just became idle is the current min watermark.
-				if (channelStatuses[channelIndex].watermark == lastOutputWatermark) {
+				if (channelStatuses[channelIndex].getWatermark() == getLastOutputWatermark()) {
 					findAndOutputMaxWatermarkAcrossAllChannels();
 				}
 
 				lastOutputStreamStatus = StreamStatus.IDLE;
 				output.emitStreamStatus(lastOutputStreamStatus);
-			} else if (channelStatuses[channelIndex].watermark == lastOutputWatermark) {
+			} else if (channelStatuses[channelIndex].getWatermark() == getLastOutputWatermark()) {
 				// if the watermark of the channel that just became idle equals the last output
 				// watermark (the previous overall min watermark), we may be able to find a new
 				// min watermark from the remaining aligned channels
-				findAndOutputNewMinWatermarkAcrossAlignedChannels();
+				findAndOutputNewMinWatermarkAcrossAlignedChannels(null);
 			}
 		} else if (streamStatus.isActive() && channelStatuses[channelIndex].streamStatus.isIdle()) {
 			// handle idle -> active toggle for the input channel
@@ -147,7 +181,7 @@ public class StatusWatermarkValve {
 
 			// if the last watermark of the input channel, before it was marked idle, is still larger than
 			// the overall last output watermark of the valve, then we can set the channel to be aligned already.
-			if (channelStatuses[channelIndex].watermark >= lastOutputWatermark) {
+			if (channelStatuses[channelIndex].getWatermark() >= getLastOutputWatermark()) {
 				channelStatuses[channelIndex].isWatermarkAligned = true;
 			}
 
@@ -160,23 +194,28 @@ public class StatusWatermarkValve {
 		}
 	}
 
-	private void findAndOutputNewMinWatermarkAcrossAlignedChannels() throws Exception {
+	private void findAndOutputNewMinWatermarkAcrossAlignedChannels(Watermark watermark) throws Exception {
 		long newMinWatermark = Long.MAX_VALUE;
+		String key = null;
 		boolean hasAlignedChannels = false;
 
 		// determine new overall watermark by considering only watermark-aligned channels across all channels
 		for (InputChannelStatus channelStatus : channelStatuses) {
 			if (channelStatus.isWatermarkAligned) {
 				hasAlignedChannels = true;
-				newMinWatermark = Math.min(channelStatus.watermark, newMinWatermark);
+				if(channelStatus.getWatermarkByWatermark(watermark).getTimestamp() < newMinWatermark){
+					newMinWatermark = Math.min(channelStatus.getWatermarkByWatermark(watermark).getTimestamp(), newMinWatermark);
+					key = channelStatus.getWatermarkByWatermark(watermark).getKey();
+				}
+
 			}
 		}
 
 		// we acknowledge and output the new overall watermark if it really is aggregated
 		// from some remaining aligned channel, and is also larger than the last output watermark
-		if (hasAlignedChannels && newMinWatermark > lastOutputWatermark) {
-			lastOutputWatermark = newMinWatermark;
-			output.emitWatermark(new Watermark(lastOutputWatermark));
+		if (hasAlignedChannels && newMinWatermark > getLastOutputWatermark(watermark)) {
+			setLastOutputWatermark(new Watermark(newMinWatermark, key));
+			output.emitWatermark(new Watermark(newMinWatermark, key));
 		}
 	}
 
@@ -187,8 +226,8 @@ public class StatusWatermarkValve {
 			maxWatermark = Math.max(channelStatus.watermark, maxWatermark);
 		}
 
-		if (maxWatermark > lastOutputWatermark) {
-			lastOutputWatermark = maxWatermark;
+		if (maxWatermark > getLastOutputWatermark()) {
+			setLastOutputWatermark(maxWatermark);
 			output.emitWatermark(new Watermark(lastOutputWatermark));
 		}
 	}
@@ -208,8 +247,44 @@ public class StatusWatermarkValve {
 	@VisibleForTesting
 	protected static class InputChannelStatus {
 		protected long watermark;
+		protected Map<String, Watermark> watermarkMap = new ConcurrentHashMap<>();
 		protected StreamStatus streamStatus;
 		protected boolean isWatermarkAligned;
+
+		public long getWatermarkTimestampByWatermark(Watermark watermark){
+			return this.getWatermarkByWatermark(watermark).getTimestamp();
+		}
+
+		public void setWatermark(long watermark){
+			this.watermark = watermark;
+		}
+
+		public void setWatermark(Watermark watermark){
+			if(null == watermark.getKey() || "".equals(watermark.getKey())) {
+				this.setWatermark(watermark.getTimestamp());
+			}else{
+				this.watermarkMap.put(watermark.getKey(), watermark);
+			}
+		}
+
+		public long getWatermark(){
+			return this.watermark;
+		}
+
+		public Watermark getWatermarkByWatermark(Watermark watermark){
+			if(watermark == null){
+				return new Watermark(this.getWatermark());
+			}
+			if(null == watermark.getKey() || "".equals(watermark.getKey())){
+				return new Watermark(this.watermark);
+			}else{
+				Watermark watermark1 = watermarkMap.get(watermark.getKey());
+				if(watermark1 == null){
+					return new Watermark(Long.MIN_VALUE, watermark.getKey());
+				}
+				return watermark1;
+			}
+		}
 
 		/**
 		 * Utility to check if at least one channel in a given array of input channels is active.

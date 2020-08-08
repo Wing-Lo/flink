@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
@@ -70,6 +71,8 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 	 * {@link org.apache.flink.streaming.api.watermark.Watermark Watermark}.
 	 */
 	private long currentWatermark = Long.MIN_VALUE;
+
+	private ConcurrentHashMap<Object, Long> currentWatermarkMap = new ConcurrentHashMap<>();
 
 	/**
 	 * The one and only Future (if any) registered to execute the
@@ -198,6 +201,14 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 	}
 
 	@Override
+	public long currentWatermark(Object key) {
+		if(!currentWatermarkMap.containsKey(key)){
+			return Long.MIN_VALUE;
+		}
+		return currentWatermarkMap.get(key);
+	}
+
+	@Override
 	public void registerProcessingTimeTimer(N namespace, long time) {
 		InternalTimer<K, N> oldHead = processingTimeTimersQueue.peek();
 		if (processingTimeTimersQueue.add(new TimerHeapInternalTimer<>(time, (K) keyContext.getCurrentKey(), namespace))) {
@@ -266,11 +277,19 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 	}
 
 	public void advanceWatermark(long time) throws Exception {
-		currentWatermark = time;
+		advanceWatermarkByKey(time, null);
+	}
+
+	public void advanceWatermarkByKey(long time, Object key) throws Exception {
+		if(key == null){
+			currentWatermark = time;
+		}else{
+			currentWatermarkMap.put(key, time);
+		}
 
 		InternalTimer<K, N> timer;
 
-		while ((timer = eventTimeTimersQueue.peek()) != null && timer.getTimestamp() <= time) {
+		while ((timer = eventTimeTimersQueue.peek()) != null && timer.getKey().equals(key) && timer.getTimestamp() <= time) {
 			eventTimeTimersQueue.poll();
 			keyContext.setCurrentKey(timer.getKey());
 			triggerTarget.onEventTime(timer);

@@ -146,6 +146,11 @@ public abstract class Trigger<T, W extends Window> implements Serializable {
 		long getCurrentWatermark();
 
 		/**
+		 * Returns the current watermark time.
+		 */
+		long getCurrentWatermarkByKey();
+
+		/**
 		 * Register a system time callback. When the current system time passes the specified
 		 * time {@link Trigger#onProcessingTime(long, Window, TriggerContext)} is called with the time specified here.
 		 *

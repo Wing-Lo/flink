@@ -38,6 +38,8 @@ public interface InternalTimerService<N> {
 	/** Returns the current event-time watermark. */
 	long currentWatermark();
 
+	long currentWatermark(Object key);
+
 	/**
 	 * Registers a timer to be fired when processing time passes the given time. The namespace
 	 * you pass here will be provided when the timer fires.
